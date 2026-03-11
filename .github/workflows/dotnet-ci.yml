@@ -83,7 +83,7 @@ jobs:
     
     - name: Upload build artifacts (${{ matrix.configuration }})
       if: matrix.configuration == 'Release'
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: build-artifacts-${{ matrix.configuration }}
         path: |
@@ -131,7 +131,7 @@ jobs:
     
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: test-results
         path: TestResults/**/*.trx
@@ -139,7 +139,7 @@ jobs:
     
     - name: Upload coverage reports
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: coverage-reports
         path: TestResults/**/coverage.cobertura.xml
