@@ -1,0 +1,214 @@
+name: .NET CI
+
+on:
+  pull_request:
+    branches: [ dev ]
+  workflow_dispatch:
+
+jobs:
+  code-quality:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Cache NuGet packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    
+    - name: Restore dependencies
+      run: dotnet restore Project-sem3-backend.sln
+    
+    - name: Check code format
+      run: |
+        dotnet format Project-sem3-backend.sln --verify-no-changes --verbosity diagnostic
+      continue-on-error: true
+      id: format-check
+    
+    - name: Format check result
+      if: steps.format-check.outcome == 'failure'
+      run: |
+        echo "::warning::Code formatting issues detected. Run 'dotnet format' locally to fix."
+        exit 1
+
+  build:
+    name: Build & Analyze
+    runs-on: ubuntu-latest
+    needs: code-quality
+    
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Cache NuGet packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    
+    - name: Restore dependencies
+      run: dotnet restore Project-sem3-backend.sln
+    
+    - name: Build solution (${{ matrix.configuration }})
+      run: |
+        dotnet build Project-sem3-backend.sln \
+          --configuration ${{ matrix.configuration }} \
+          --no-restore \
+          --verbosity normal \
+          /p:TreatWarningsAsErrors=true
+    
+    - name: Upload build artifacts (${{ matrix.configuration }})
+      if: matrix.configuration == 'Release'
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-artifacts-${{ matrix.configuration }}
+        path: |
+          **/bin/${{ matrix.configuration }}/**
+          **/obj/${{ matrix.configuration }}/**
+        retention-days: 7
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Cache NuGet packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    
+    - name: Restore dependencies
+      run: dotnet restore Project-sem3-backend.sln
+    
+    - name: Build for testing
+      run: dotnet build Project-sem3-backend.sln --configuration Release --no-restore
+    
+    - name: Run tests with coverage
+      run: |
+        dotnet test Project-sem3-backend.sln \
+          --configuration Release \
+          --no-build \
+          --verbosity normal \
+          --logger "trx;LogFileName=test-results.trx" \
+          --collect:"XPlat Code Coverage" \
+          --results-directory ./TestResults
+      continue-on-error: true
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: TestResults/**/*.trx
+        retention-days: 30
+        if-no-files-found: ignore
+    
+    - name: Upload coverage reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-reports
+        path: TestResults/**/coverage.cobertura.xml
+        retention-days: 30
+        if-no-files-found: ignore
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: code-quality
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Restore dependencies
+      run: dotnet restore Project-sem3-backend.sln
+    
+    - name: Check for vulnerable packages
+      run: |
+        dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerable-packages.txt
+        if grep -q "has the following vulnerable packages" vulnerable-packages.txt; then
+          echo "::error::Vulnerable packages detected!"
+          cat vulnerable-packages.txt
+          exit 1
+        fi
+    
+    - name: Check for deprecated packages
+      run: |
+        dotnet list package --deprecated 2>&1 | tee deprecated-packages.txt
+        if grep -q "has the following deprecated packages" deprecated-packages.txt; then
+          echo "::warning::Deprecated packages detected!"
+          cat deprecated-packages.txt
+        fi
+      continue-on-error: true
+
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, build, test, security-scan]
+    if: always()
+    
+    steps:
+    - name: Check job results
+      run: |
+        echo "## CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Code Quality | ${{ needs.code-quality.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Test | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ needs.code-quality.result }}" == "failure" ]] || \
+           [[ "${{ needs.build.result }}" == "failure" ]] || \
+           [[ "${{ needs.test.result }}" == "failure" ]] || \
+           [[ "${{ needs.security-scan.result }}" == "failure" ]]; then
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **CI Pipeline Failed**" >> $GITHUB_STEP_SUMMARY
+          exit 1
+        else
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **CI Pipeline Passed**" >> $GITHUB_STEP_SUMMARY
+        fi
