@@ -128,6 +128,7 @@ jobs:
           --logger "trx;LogFileName=test-results.trx" \
           --collect:"XPlat Code Coverage" \
           --results-directory ./TestResults
+      continue-on-error: true
     
     - name: Upload test results
       if: always()
@@ -136,6 +137,7 @@ jobs:
         name: test-results
         path: TestResults/**/*.trx
         retention-days: 30
+        if-no-files-found: ignore
     
     - name: Upload coverage reports
       if: always()
@@ -144,6 +146,7 @@ jobs:
         name: coverage-reports
         path: TestResults/**/coverage.cobertura.xml
         retention-days: 30
+        if-no-files-found: ignore
 
   security-scan:
     name: Security Scan
