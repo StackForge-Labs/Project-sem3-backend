@@ -62,6 +62,10 @@ appsettings.*.json
 .env
 !.env.example
 Infrastructure/env/.env*
+
+# Lock files - uncomment to ignore lock files
+# packages.lock.json
+# global.json
 # ========================
 # OS / IDE
 # ========================
