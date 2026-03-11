@@ -1,0 +1,39 @@
+name: Feature Branch Check
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - dev
+
+jobs:
+  quick-check:
+    name: Quick Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Restore dependencies
+      run: dotnet restore Project-sem3-backend.sln
+    
+    - name: Check code format
+      run: dotnet format Project-sem3-backend.sln --verify-no-changes --verbosity diagnostic
+    
+    - name: Build
+      run: dotnet build Project-sem3-backend.sln --configuration Release --no-restore /p:TreatWarningsAsErrors=true
+    
+    - name: Security scan
+      run: |
+        dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerable-packages.txt
+        if grep -q "has the following vulnerable packages" vulnerable-packages.txt; then
+          echo "::error::Vulnerable packages detected!"
+          cat vulnerable-packages.txt
+          exit 1
+        fi
